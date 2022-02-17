@@ -6,14 +6,16 @@ def layer_norm(x):
     mean, var = tf.nn.moments(x, axes= [-1], keep_dims= True)
     epsilon = 1e-6
 
-    # beta = tf.get_variable('beta', shape= (x.shape[2]), initializer= tf.initializers.zeros)
-    # gamma = tf.get_variable('gamma', shape= (x.shape[2]), initializer= tf.initializers.ones)
+    beta = tf.get_variable('beta', shape= (x.shape[2]), initializer= tf.initializers.zeros)
+    gamma = tf.get_variable('gamma', shape= (x.shape[2]), initializer= tf.initializers.ones)
 
     # beta = tf.get_variable(tf.zeros([x.shape[3]]))
     # gamma = tf.Variable(tf.ones([x.shape[3]]))
 
     x = tf.divide(tf.subtract(x, mean), tf.sqrt(tf.add(var, epsilon)))
-    # x = gamma*x + beta
+    # temp_x = tf.transpose(x, [0, 2, 1])
+    temp_x = gamma*x + beta
+    # x = tf.transpose(temp_x, [0, 2, 1])
 
     return x
 
@@ -69,15 +71,19 @@ def ffn(x, d_model, d_inner):
 
     return out
 
-def class_head(z, d_model, num_classes):
-    W1_ch = tf.get_variable('ch_w1', shape=(d_model, 1024), initializer=tf.contrib.layers.xavier_initializer())
-    B1_ch = tf.get_variable('ch_b1', shape=(1024), initializer=tf.contrib.layers.xavier_initializer())
-    W2_ch = tf.get_variable('ch_w2', shape=(1024, num_classes), initializer=tf.contrib.layers.xavier_initializer())
-    B2_ch = tf.get_variable('ch_b2', shape=(num_classes), initializer=tf.contrib.layers.xavier_initializer())
+def class_head(z, num_classes):
+    W1_ch = tf.get_variable('ch_w1', shape=(z.shape[1], 2048), initializer=tf.contrib.layers.xavier_initializer())
+    B1_ch = tf.get_variable('ch_b1', shape=(2048), initializer=tf.contrib.layers.xavier_initializer())
+    W2_ch = tf.get_variable('ch_w2', shape=(2048, 1024), initializer=tf.contrib.layers.xavier_initializer())
+    B2_ch = tf.get_variable('ch_b2', shape=(1024), initializer=tf.contrib.layers.xavier_initializer())
+    W3_ch = tf.get_variable('ch_w3', shape=(1024, num_classes), initializer=tf.contrib.layers.xavier_initializer())
+    B3_ch = tf.get_variable('ch_b3', shape=(num_classes), initializer=tf.contrib.layers.xavier_initializer())
 
     out = tf.nn.bias_add(tf.matmul(z, W1_ch), B1_ch)
     out = tf.nn.relu(out)
     out = tf.nn.bias_add(tf.matmul(out, W2_ch), B2_ch)
+    out = tf.nn.relu(out)
+    out = tf.nn.bias_add(tf.matmul(out, W3_ch), B3_ch)
 
     return out
 
@@ -85,9 +91,6 @@ def class_head(z, d_model, num_classes):
 def net(x, num_blocks, d_model, num_heads, d_proj, d_inner, num_classes):
 
     x = embedding_layer(x, d_model)
-    cls_token = tf.zeros((tf.shape(x)[0], 1, d_model), 'float')
-    x = tf.concat([cls_token, x], axis= 1)
-
     pos_embed = pos_embedding(x, d_model)
 
     x = tf.add(x, pos_embed)
@@ -107,8 +110,10 @@ def net(x, num_blocks, d_model, num_heads, d_proj, d_inner, num_classes):
                 x_ffn = ffn(x_norm, d_model, d_inner)
             x = x_ffn + x
 
+    # x = layer_norm(x)
     with tf.variable_scope('class_head', reuse= tf.AUTO_REUSE):
-        logits = class_head(tf.gather(x, 0, axis= 1), d_model, num_classes)
+        x = tf.reshape(x, [-1, x.shape[1]*x.shape[2]])
+        logits = class_head(x, num_classes)
 
     return logits
 
